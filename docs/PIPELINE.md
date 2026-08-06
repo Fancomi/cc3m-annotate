@@ -7,8 +7,8 @@ cc3m-tsv/_shards/*.tsv
         │  path + 原始 caption
         ▼
 [1] s1_caption.py       gemma4 两级 caption          out/caption/shard{N}.jsonl
-        │                                                   │ 约 8% 请求失败
-        │                          [1b] s1b_caption_retry.py│ scan → run → merge（原地补齐）
+        │                                                   │ 失败条目会在重跑时自动重试
+        │                                [1b] compact.py    │ 压实重复行 + 完整性检查
         ▼
 [2] s2_grounding.py     Florence-2 短语定位          out/ground/ground_shard{N}.jsonl
         ▼
@@ -33,18 +33,22 @@ cc3m-tsv/_shards/*.tsv
 
 输出字段：`{id, shard, path, gt_caption, gemma_short, gemma_dense, dt_s}`。失败条目带 `error`，缺 `gemma_dense`。
 
-## 阶段 1b · 补齐
+**续传只跳过成功条目**（`common.is_ok`）—— error 行会在重跑时被自动重试。首轮全量跑因为把 error 行也当已完成，8.3% 的图（238874/2894191）永久缺 dense，这个语义已修正。
 
-sglang 实例在长时批处理中偶发 watchdog 重启，期间的请求报 `APIConnectionError`。全量实测约 24 万条（8%）。
+`ask_vlm` 带换端点 + 指数退避重试（4 次）。上述 8.3% 失败的根因就是没有重试：单个 sglang 实例被 watchdog 重启期间，路由到它的请求直接判死。
+
+## 阶段 1b · 压实收口
+
+续传是 append 语义 —— 补跑一条 error 记录时，成功结果追加在原 error 行之后，同一张图会出现多行。下游按 `path` 建索引时后写的覆盖先写的，行为正确但文件冗余、行数不等于图数。
 
 ```bash
-bash run/1b_retry.sh scan     # 全扫 3.7G，提取缺 dense 的条目 → retry_worklist.jsonl
-bash run/1b_retry.sh run      # 8 进程并行补跑 → retry_shard{N}.jsonl
-bash run/1b_retry.sh merge    # 成功项按 path 覆盖回原 shard
-bash run/1b_retry.sh          # 以上三步 + 等待，一条命令搞定
+bash run/1b_compact.sh          # 压实：每图一行，优先保成功记录
+bash run/1b_compact.sh check    # 只报告不改文件
 ```
 
-`merge` 原地改写 `shard*.jsonl`（先写 `.tmp` 再 `rename`，中断不会留半截文件），保持原行序，所以补齐后每行仍与原图一一对应。
+同一 `path` 的多行里保留「成功且最后写入」的那条；若全部失败则保留最后一条 error 供下一轮重试。原地覆写（先写 `.tmp` 再 `rename`），保持首次出现的顺序。
+
+若报告仍有缺失，直接重跑 `bash run/1_caption.sh`，它只会补这些条目。
 
 ## 阶段 2 · grounding
 

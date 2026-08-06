@@ -31,14 +31,14 @@ bash run/run_all.sh              # 全量：289 万张，约 60 小时
 
 ```bash
 bash run/1_caption.sh            # 阶段1  caption            约 30 小时
-bash run/1b_retry.sh             # 阶段1b 补齐失败项          约 1 小时
+bash run/1b_compact.sh           # 阶段1b 压实 + 完整性检查    约 3 分钟
 bash run/sgl.sh down             # 释放显存给 Florence-2
 bash run/2_grounding.sh          # 阶段2  grounding          约 29 小时
 bash run/3_clean.sh              # 阶段3  清洗               约 20 分钟
 bash run/4_verify.sh             # 阶段4  抽样校验 + 报告     约 10 分钟
 ```
 
-所有阶段都断点续传：中断后重跑同一条命令即从断点继续。
+所有阶段都断点续传，且**只跳过成功条目** —— 失败的会在重跑时自动重试。中断后重跑同一条命令即可。
 
 ## 产出
 
@@ -73,10 +73,10 @@ grounding 阶段用了三个优化叠加，合计 **3.85× 加速**（3150ms →
 install.sh          环境一键配置
 run/                入口脚本，按阶段编号；改路径只需改 run/env.sh
 src/                实现
-  common.py         图像编码、VLM 客户端、jsonl 读写、分片、断点续传
+  common.py         图像编码、VLM 客户端（含重试）、jsonl 读写、分片、断点续传、共用正则
   batch.py          并发/串行批处理骨架（分片 + 续传 + 进度打点）
   s1_caption.py     阶段1  gemma4 两级 caption
-  s1b_caption_retry.py  阶段1b scan/run/merge 补齐失败项
+  compact.py        阶段1b 分片去重收口（append 续传产生的重复行）
   s2_grounding.py   阶段2  Florence-2 batch grounding
   s3_clean.py       阶段3  短语清洗
   s4_verify.py      阶段4  抽样校验

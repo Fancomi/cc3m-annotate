@@ -25,7 +25,7 @@ if [ "$SMOKE" = "1" ]; then
   log "===== 冒烟模式：每个 tsv 取 2 行 ====="
   LIMIT=2 bash "$HERE/1_caption.sh"
   wait_for "s1_caption.py" "阶段1 caption"
-  log "caption 条数 $(count "$OUT/caption/shard*.jsonl")"
+  bash "$HERE/1b_compact.sh"
 
   bash "$HERE/2_grounding.sh"
   wait_for "s2_grounding.py" "阶段2 grounding"
@@ -40,10 +40,16 @@ fi
 log "===== 阶段1/5 caption（全量 289 万张，约 30 小时）====="
 bash "$HERE/1_caption.sh"
 wait_for "s1_caption.py" "阶段1 caption"
-log "caption 条数 $(count "$OUT/caption/shard*.jsonl")"
 
-log "===== 阶段2/5 补齐失败项 ====="
-bash "$HERE/1b_retry.sh" all
+log "===== 阶段2/5 压实分片 + 检查完整性 ====="
+bash "$HERE/1b_compact.sh"
+# 若有缺失则再跑一轮 caption（error 条目会被自动重试），最多两轮
+if grep -q "仍缺 [1-9]" "$LOGS/compact.log" 2>/dev/null; then
+  log "存在缺失，再跑一轮补齐"
+  bash "$HERE/1_caption.sh"
+  wait_for "s1_caption.py" "阶段1 补跑"
+  bash "$HERE/1b_compact.sh"
+fi
 
 log "===== 阶段3/5 grounding（约 29 小时）====="
 bash "$HERE/sgl.sh" down          # 释放显存给 F2
