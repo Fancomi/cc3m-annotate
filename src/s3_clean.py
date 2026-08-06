@@ -14,23 +14,11 @@
 默认只开前四条（无损清洗）。要做训练数据再加 --min-area 0.02 --min-words 2，
 该档实测精度 80.3%、保留 66%，折合约 16 个有效短语/图。
 """
-import argparse, glob, os, re, sys
+import argparse, glob, os, sys
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import iter_jsonl, iter_shards, write_jsonl
-
-VAGUE = re.compile(
-    r"^(the|this|a|an)?\s*(entire|whole|overall)?\s*"
-    r"(image|photo|photograph|picture|scene|view|frame|composition|background|foreground)s?$",
-    re.I)
-STOP = {"a", "an", "the", "of", "in", "on", "at", "to", "for", "with", "and", "or",
-        "its", "his", "her", "their", "this", "that", "these", "those"}
-
-
-def norm(s):
-    """小写、去标点连字符、压空格 —— 使 `black-framed` 能匹配 caption 里的 `black framed`。"""
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", s.lower())).strip()
+from common import VAGUE, content_words, iter_jsonl, iter_shards, norm_phrase, write_jsonl
 
 
 def iou(a, b):
@@ -51,10 +39,10 @@ def clean_one(grounding, cap_norm, wh, args, stat):
         if args.vague and VAGUE.match(p):
             stat["vague"] += 1
             continue
-        if args.garbled and cap_norm and norm(p) and norm(p) not in cap_norm:
+        if args.garbled and cap_norm and norm_phrase(p) and norm_phrase(p) not in cap_norm:
             stat["garbled"] += 1
             continue
-        if len([w for w in norm(p).split() if w not in STOP]) < args.min_words:
+        if len(content_words(p)) < args.min_words:
             stat["words"] += 1
             continue
         kept = boxes
@@ -103,7 +91,7 @@ def main():
     args = ap.parse_args()
 
     # caption 索引以 path 为键（path 全局唯一，id 会在 tsv 之间撞号）
-    cap = {r["path"]: norm(r["gemma_dense"])
+    cap = {r["path"]: norm_phrase(r["gemma_dense"])
            for r in iter_shards(args.cap_dir) if r.get("gemma_dense")}
     print(f"caption 索引 {len(cap)} 条", flush=True)
 

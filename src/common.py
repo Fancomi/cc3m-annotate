@@ -1,8 +1,8 @@
 """公共模块：图像编码、VLM 客户端、断点续传、分片、prompt 常量。
 
-所有阶段脚本共用。改这里会影响全部阶段，改动前先跑 run/0_smoke.sh。
+所有阶段脚本共用。改这里会影响全部阶段，改完跑 bash run/run_all.sh --smoke 验证。
 """
-import base64, glob, io, json, os
+import base64, glob, io, json, os, re, time
 
 # ---------------- caption prompt ----------------
 # 两级 prompt。DENSE 是整条链路的源头：它决定 grounding 能定位到哪些短语，
@@ -13,6 +13,25 @@ DENSE = ("Describe this image in one dense paragraph. Explicitly name every dist
 
 # Florence-2 短语定位任务标记
 TASK_GROUND = "<CAPTION_TO_PHRASE_GROUNDING>"
+
+# 整体指代类短语：ground 到全图，对区域标注无价值。
+# 阶段3（清洗）与阶段4（校验）共用这一份 —— 否则校验会去烧算力验清洗本就要删的短语。
+VAGUE = re.compile(
+    r"^(the|this|a|an)?\s*(entire|whole|overall)?\s*"
+    r"(image|photo|photograph|picture|scene|view|frame|composition|background|foreground)s?$",
+    re.I)
+
+# 判断短语是否忠实摘抄自 caption 时用的停用词表
+STOP = frozenset("a an the of in on at to for with and or its his her their this that these those".split())
+
+
+def norm_phrase(s):
+    """小写、去标点连字符、压空格 —— 使 `black-framed` 能匹配 caption 里的 `black framed`。"""
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", s.lower())).strip()
+
+
+def content_words(s):
+    return [w for w in norm_phrase(s).split() if w not in STOP]
 
 
 def b64(img, maxside=768, quality=90):
@@ -53,22 +72,39 @@ def round_robin(items):
     return lambda: items[next(c) % len(items)]
 
 
-def ask_vlm(client, model, img_b64, prompt, max_tokens=320):
-    """单轮图文问答。
+def ask_vlm(clients, model, img_b64, prompt, max_tokens=320, retries=4, pick=None):
+    """单轮图文问答，失败换端点重试。
 
     enable_thinking=False 必须带：这些模型默认开推理链，会把"The user wants..."
     当正文吐出来并吃满 token 预算（实测拿不到 caption）。
+
+    重试+换端点必须带：8 实例长跑时个别 sglang 实例会被 watchdog 重启，
+    期间路由到它的请求直接失败。首轮全量 caption 没有重试，8.3% 的图
+    （238874/2894191）落成了 APIConnectionError。
+
+    clients 可以是客户端列表，也可以是单个客户端（自动包成单元素列表）。
     """
-    r = client.chat.completions.create(
-        model=model, max_tokens=max_tokens, temperature=0.0,
-        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-        messages=[{"role": "user", "content": [
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
-            {"type": "text", "text": prompt}]}])
-    txt = r.choices[0].message.content or ""
-    if "</think>" in txt:
-        txt = txt.split("</think>", 1)[1]
-    return txt.strip()
+    if not isinstance(clients, (list, tuple)):
+        clients = [clients]
+    if pick is None:
+        pick = round_robin(clients)
+    last = None
+    for k in range(retries):
+        try:
+            r = pick().chat.completions.create(
+                model=model, max_tokens=max_tokens, temperature=0.0,
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+                messages=[{"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                    {"type": "text", "text": prompt}]}])
+            txt = r.choices[0].message.content or ""
+            if "</think>" in txt:
+                txt = txt.split("</think>", 1)[1]
+            return txt.strip()
+        except Exception as e:
+            last = e
+            time.sleep(2 ** k)
+    raise last
 
 
 # ---------------- jsonl 读写 ----------------
@@ -105,9 +141,19 @@ def rec_key(r):
     return r["path"]
 
 
-def load_done(path, key=rec_key):
-    """读已有输出，返回已完成键集合。文件不存在返回空集。"""
-    return {key(r) for r in iter_jsonl(path)} if os.path.exists(path) else set()
+def is_ok(r):
+    """记录是否算「成功完成」。error 占位行不算，重跑时会被重试。
+
+    首轮全量 caption 把 error 行也当已完成，导致 8.3% 的图永久缺 dense。
+    """
+    return "error" not in r
+
+
+def load_done(path, key=rec_key, ok=is_ok):
+    """读已有输出，返回已成功完成的键集合。文件不存在返回空集。"""
+    if not os.path.exists(path):
+        return set()
+    return {key(r) for r in iter_jsonl(path) if ok(r)}
 
 
 def take_shard(records, shard, num_shards, key=lambda r: r["id"]):

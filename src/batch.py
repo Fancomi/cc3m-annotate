@@ -1,6 +1,7 @@
 """并发批处理骨架：分片 + 断点续传 + 进度打点。
 
 阶段脚本只需提供「取任务列表」和「处理单条」两个函数，其余交给这里。
+续传只跳过成功条目（`common.is_ok`），error 占位行会被重试。
 """
 import time
 from concurrent.futures import ThreadPoolExecutor

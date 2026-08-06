@@ -12,14 +12,12 @@
 结果读作精度下界，不是绝对真值 —— 判定器与 caption 出自同一模型族时存在确认偏误。
 可比的是「同判定器、同样本、同 prompt」下的相对差异。
 """
-import argparse, glob, os, random, re, sys
+import argparse, glob, os, random, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from batch import run_pool
-from common import ask_vlm, b64, iter_jsonl, make_clients, round_robin
+from common import VAGUE, ask_vlm, b64, iter_jsonl, make_clients, round_robin
 
-# 整体指代类短语跳过：ground 到全图，裁剪后问"能否看到"没有意义
-SKIP = re.compile(r"^(this|the)?\s*(image|photo|picture|scene|view|background|foreground)$", re.I)
 PROMPT = ('Is "{p}" clearly visible in this image crop? '
           'Answer with exactly one word: yes or no.')
 
@@ -47,13 +45,14 @@ def main():
     random.shuffle(rows)
     rows = rows[:args.sample]
 
-    # 展开成 (图, 短语, 框) 任务：每短语只验第一个框，避免同短语多框重复计数
+    # 展开成 (图, 短语, 框) 任务：每短语只验第一个框，避免同短语多框重复计数。
+    # VAGUE 与阶段3 共用同一份正则，不重复校验清洗本就会删的短语。
     tasks = []
     for r in rows:
         for k, (phrase, boxes) in enumerate(r["grounding"].items()):
             if k >= args.max_boxes:
                 break
-            if SKIP.match(phrase.strip()):
+            if VAGUE.match(phrase.strip()):
                 continue
             tasks.append({"path": r["path"], "phrase": phrase, "box": boxes[0],
                           "n_box": len(boxes)})
@@ -74,8 +73,8 @@ def main():
             if crop.width < 8 or crop.height < 8:
                 rec["verdict"] = "TOO_SMALL"
                 return rec
-            a = ask_vlm(pick(), args.model, b64(crop, maxside=512, quality=88),
-                        PROMPT.format(p=t["phrase"].strip()), max_tokens=6).lower()
+            a = ask_vlm(clients, args.model, b64(crop, maxside=512, quality=88),
+                        PROMPT.format(p=t["phrase"].strip()), max_tokens=6, pick=pick).lower()
             rec["verdict"] = "YES" if a.startswith("yes") else "NO" if a.startswith("no") else "UNPARSED"
         except Exception as e:
             rec["verdict"] = "ERROR"

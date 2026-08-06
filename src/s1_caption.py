@@ -55,10 +55,10 @@ def main():
         rec = dict(it)
         try:
             enc = b64(Image.open(it["path"]).convert("RGB"))
-            c = pick()
             t0 = time.perf_counter()
-            rec["gemma_short"] = ask_vlm(c, args.model, enc, SHORT, 160)
-            rec["gemma_dense"] = ask_vlm(c, args.model, enc, DENSE, 320)
+            # 传整个 clients 列表：失败时 ask_vlm 会换端点重试
+            rec["gemma_short"] = ask_vlm(clients, args.model, enc, SHORT, 160, pick=pick)
+            rec["gemma_dense"] = ask_vlm(clients, args.model, enc, DENSE, 320, pick=pick)
             rec["dt_s"] = round(time.perf_counter() - t0, 2)
         except Exception as e:
             rec["error"] = f"{type(e).__name__}: {e}"

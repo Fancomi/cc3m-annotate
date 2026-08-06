@@ -24,7 +24,7 @@ caption 没写的物体不会被 ground 出来（实测 88.5% 的短语可逐字
    F2 的 SDPA 实现不支持 padding（会形状冲突），所以同 batch 必须等长。
    按 caption 词数排序后相邻成组，截断损失最小。
 """
-import argparse, json, os, sys, time
+import argparse, os, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import TASK_GROUND, iter_shards, load_done, open_append, take_shard, write_jsonl
