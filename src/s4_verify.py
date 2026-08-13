@@ -30,7 +30,8 @@ def main():
     ap.add_argument("--urls", required=True)
     ap.add_argument("--model", default="/dev/shm/models/gemma-4-26B-A4B-it")
     ap.add_argument("--sample", type=int, default=400, help="抽多少张图")
-    ap.add_argument("--max-boxes", type=int, default=12, help="每图最多校验多少短语")
+    ap.add_argument("--max-boxes", type=int, default=12,
+                    help="每图最多校验多少短语，0 = 不限（做规则对照时必须用 0，否则两侧口径不一致）")
     ap.add_argument("--pad", type=float, default=0.12, help="裁剪外扩比例，保留上下文")
     ap.add_argument("--concurrency", type=int, default=32)
     ap.add_argument("--seed", type=int, default=0)
@@ -50,7 +51,7 @@ def main():
     tasks = []
     for r in rows:
         for k, (phrase, boxes) in enumerate(r["grounding"].items()):
-            if k >= args.max_boxes:
+            if args.max_boxes and k >= args.max_boxes:
                 break
             if VAGUE.match(phrase.strip()):
                 continue

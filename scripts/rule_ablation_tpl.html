@@ -1,0 +1,231 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>清洗规则消融对照</title>
+<style>
+:root{--bg:#0f1115;--fg:#e8e8e8;--dim:#98a0aa;--card:#181b21;--line:#2b3038;
+      --ok:#4ade80;--bad:#ff6b6b;--acc:#2ec4ff;--warn:#fbbf24}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.55 -apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:12px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:30}
+h1{margin:0 0 5px;font-size:15px}
+.sub{color:var(--dim);font-size:12.5px}
+details.note{background:#12212a;border-left:3px solid var(--acc);padding:8px 14px;margin:10px 22px;
+  border-radius:4px;font-size:13px;color:#bfe9ff}
+details.note summary{cursor:pointer;color:#fff;font-weight:600;outline:none}
+details.note div{margin-top:8px}
+.summary{margin:10px 22px;overflow-x:auto}
+.legend{display:flex;gap:12px;flex-wrap:wrap;margin:8px 22px;font-size:12px;color:var(--dim)}
+.legend span b{color:var(--warn)}
+.wrap{max-width:1500px;margin:0 auto;padding:0 22px 90px}
+
+/* ---- 滑条导航 ---- */
+.nav{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px}
+.nav button{font:inherit;padding:5px 14px;border-radius:6px;border:1px solid var(--line);
+  background:#20242c;color:var(--fg);cursor:pointer}
+.nav button:hover:not(:disabled){border-color:var(--acc)}
+.nav button:disabled{opacity:.35;cursor:default}
+.nav .pos{font-size:13px;color:var(--dim);min-width:96px;text-align:center}
+.nav .pos b{color:var(--fg);font-size:15px}
+.bar{flex:1;min-width:140px;height:5px;background:#242830;border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--acc);width:0;transition:width .15s}
+.nav input[type=range]{flex:2;min-width:180px;accent-color:var(--acc)}
+.nav select,.nav label{font:inherit;font-size:12.5px;color:var(--dim)}
+.nav select{background:#20242c;color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:4px 7px}
+.kb{color:var(--dim);font-size:11.5px}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px;margin:16px 0}
+.hd{display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;margin-bottom:12px}
+.hd b{font-size:15px}
+.cols{display:flex;gap:14px;flex-wrap:wrap}
+.col{flex:1;min-width:300px}
+.col h3{margin:0 0 6px;font-size:13px;color:var(--dim);font-weight:600}
+.col h3 em{color:var(--acc);font-style:normal}
+.col img{display:block;border-radius:4px;border:1px solid var(--line);max-width:100%}
+table{border-collapse:collapse;width:100%;margin-top:14px;font-size:12.5px}
+th,td{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}
+th{background:#20242c;color:var(--dim);font-weight:600;position:sticky;top:0}
+td.keep{color:var(--ok);text-align:center;font-weight:700}
+td.drop{color:#8b939c;text-align:center;font-size:11.5px}
+td.drop b{color:var(--bad);font-weight:600}
+tr.grp td{background:#1e232b;color:var(--warn);font-weight:600;font-size:12px;border-top:2px solid var(--line)}
+tr.grp span{color:var(--dim);font-weight:400}
+details.grp{margin:12px 0;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+details.grp>summary{background:#1e232b;color:var(--warn);font-weight:600;font-size:12.5px;
+  padding:7px 12px;cursor:pointer;outline:none;list-style:none}
+details.grp>summary::-webkit-details-marker{display:none}
+details.grp>summary::before{content:'▸ ';color:var(--dim)}
+details.grp[open]>summary::before{content:'▾ '}
+details.grp>summary:hover{background:#252b35}
+details.grp>summary span{color:var(--dim);font-weight:400}
+details.grp table{margin:0}
+details.grp th{top:0}
+code{background:#20242c;padding:1px 5px;border-radius:3px;font-size:12px}
+.tag{display:inline-block;padding:0 6px;border-radius:9px;font-size:10.5px;font-weight:600;
+  background:#3a2a13;color:var(--warn);margin-left:5px}
+</style></head><body>
+<header>
+<h1>清洗规则消融对照 · 逐图审核每条短语的去留与原因</h1>
+<div class="sub" id="sum"></div>
+<div class="nav">
+  <button id="prev">← 上一张</button>
+  <span class="pos" id="pos"></span>
+  <button id="next">下一张 →</button>
+  <input type="range" id="slider" min="0" value="0">
+  <div class="bar"><i id="fill"></i></div>
+  <select id="sortBy">
+    <option value="rule">按审核类别排序</option>
+    <option value="raw">按原始顺序</option>
+    <option value="words">按实词数排序</option>
+  </select>
+  <label><input type="checkbox" id="hideImg"> 隐藏图片</label>
+  <span class="kb">← → 翻页 · Home/End 首尾</span>
+</div>
+</header>
+
+<details class="note">
+<summary>这两档差在哪、为什么推荐档不再过滤小框（点开）</summary>
+<div>
+两档共用的短语级规则：<code>vague</code>（整体指代）、<code>abstract</code>（图像属性/取景词，实测精度仅 26%）、
+<code>garbled</code>（整词口径下不在源 caption 里 → 解码碎片）、<code>dup</code>、<code>xdup</code>（同义重复合并）。
+差异只在<b>怎么处理框的大小</b>：<br><br>
+<b>C 现行</b> 加 <code>--min-area 0.02</code>，删掉面积不足全图 2% 的框。<br>
+<b>D 推荐</b> <b>不设任何面积/像素下限</b>，只加 <code>--max-cover 0.95</code>（框住整图的删）
+和 <code>--edge</code>（只压着图像边缘的窄条删）。<br><br>
+<b>依据</b>：9 档消融（20000 图清洗 + 各抽 800 图同判定器校验）显示，所有大小过滤的精度提升
+都是靠砍数据换来的，「正确短语/图」全部低于不过滤的基线 ——
+<code>面积>=2%</code> −20%、<code>短边>=48px</code> −18%、<code>短边>=32px</code> −10%。
+而 <code>ratio</code>（长宽比）与 <code>nbox</code>（单短语框数）精度反降，已被否掉。<br>
+更关键的是<b>小框判 NO 大半是判定器看不清，不是数据错</b>：按绝对像素分桶精度平滑单调
+（&lt;16px 26.9% → ≥160px 78.6%，无断崖，说明找不到"自然"阈值）；进一步看，
+那些在大框上精度 ≥70% 的短语（说明短语本身没问题），落到 &lt;32px 的小框上精度只有 50.6% ——
+<code>nose</code> 在大框上 5/5 全对，在 18~28px 小框上屡屡判 NO。<b>鼻子当然在那里</b>，
+是判定器在 20px 尺度分辨不出。用这种"精度"论证删小物体，等于用判定器的缺陷惩罚数据；
+而删掉就再也拿不回来，控制质量应在训练时按框大小加权。<br><br>
+表格：<b>✓</b> = 该档保留，<b>红字规则名</b> = 该档删掉它的原因。该图<b>全部</b>短语按审核类别分成可折叠块，
+删除类别默认展开（审核重点是"删得对不对"），保留类别默认收起。
+</div>
+</details>
+
+<div class="summary" id="summary"></div>
+<div class="legend" id="legend"></div>
+<div class="wrap" id="wrap"></div>
+<script>
+const DATA = __DATA__, META = __META__, RULES = __RULES__, V = __VARIANTS__;
+const LAST = V[V.length - 1];
+const wrap = document.getElementById('wrap');
+let cur = 0;
+
+let tot = {}, raw = 0;
+V.forEach(v => tot[v] = 0);
+DATA.forEach(it => { raw += it.n_raw; it.cols.forEach(c => tot[c.v] += c.n); });
+document.getElementById('sum').textContent =
+  `${DATA.length} 张图 · 清洗前 ${raw} 短语 → ` + V.map(v => `${META[v].label} ${tot[v]}`).join(' / ');
+
+// 全局规则命中统计（图例）
+const cnt = {};
+DATA.forEach(it => it.rows.forEach(r => r.cells.forEach(c => {
+  if (!c.keep) cnt[c.rule] = (cnt[c.rule] || 0) + 1; })));
+const RULE_ORDER = Object.entries(cnt).sort((a, b) => b[1] - a[1]).map(x => x[0]);
+document.getElementById('legend').innerHTML = RULE_ORDER
+  .map(k => `<span><b>${k}</b> ${cnt[k]} — ${RULES[k] || ''}</span>`).join('');
+
+function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'})[c])}
+
+// 顶部汇总表：按实际对比的档位生成，避免写死档位后与 --variants 不一致
+(function(){
+  const base = META[V[0]];
+  const rows = V.map(v => {
+    const m = META[v], eff = m.dens * m.prec / 100, be = base.dens * base.prec / 100;
+    const rel = v === V[0] ? '—' : `${((eff/be-1)*100>=0?'+':'')}${((eff/be-1)*100).toFixed(0)}%`;
+    const bold = s => v === LAST ? `<b>${s}</b>` : s;
+    return `<tr><td>${m.label}</td><td>${bold(m.dens.toFixed(2))}</td>`
+         + `<td>${bold(m.prec.toFixed(1)+'%')}</td><td>${bold(eff.toFixed(2))}</td><td>${rel}</td></tr>`;
+  }).join('');
+  document.getElementById('summary').innerHTML = `
+    <table style="max-width:860px">
+    <tr><th>档位</th><th>短语/图</th><th>精度</th><th>正确短语/图</th><th>相对 ${base.label}</th></tr>
+    ${rows}</table>
+    <div style="color:var(--dim);font-size:12px;margin-top:6px">
+    20000 图清洗 + 各抽 800 图校验（同判定器、不限每图短语数）。
+    「正确短语/图」= 短语密度 × 精度，是训练能拿到的有效监督信号量。
+    精度是同判定器下的相对值，不是绝对真值。</div>`;
+})();
+
+function cell(c){
+  if (c.keep) return '<td class="keep">✓</td>';
+  return `<td class="drop"><b>${c.rule}</b>${c.note ? '<br>' + esc(c.note) : ''}</td>`;
+}
+
+// 审核类别 = 末档（C）对这条短语的处置。保留的排最后，删除的按全局命中量分组。
+function category(r){
+  const c = r.cells[V.indexOf(LAST)];
+  return c.keep ? '__keep__' : c.rule;
+}
+function catLabel(k, n){
+  if (k === '__keep__') return `${META[LAST].label} 保留 · ${n} 条`;
+  return `${META[LAST].label} 按 <b>${k}</b> 删除 · ${n} 条 <span>— ${RULES[k] || ''}</span>`;
+}
+
+function tableRows(it){
+  const mode = document.getElementById('sortBy').value;
+  const mk = r => `<tr><td><code>${esc(r.ph)}</code>${r.abs ? '<span class="tag">abstract</span>' : ''}</td>
+      <td style="text-align:center;color:var(--dim)">${r.nw}</td>${r.cells.map(cell).join('')}</tr>`;
+  const head = `<tr><th>短语</th><th>实词</th>${
+    V.map(v => `<th>${META[v].label}</th>`).join('')}</tr>`;
+  const table = rows => `<table>${head}${rows}</table>`;
+
+  if (mode === 'raw') return table(it.rows.map(mk).join(''));
+  if (mode === 'words')
+    return table(it.rows.slice()
+      .sort((a, b) => b.nw - a.nw || a.ph.localeCompare(b.ph)).map(mk).join(''));
+
+  // 按审核类别分组，每组一个可折叠块：删除类别在前（按全局命中量降序）且默认展开
+  // ——审核重点是"删得对不对"；保留组条数最多，默认收起免得刷屏。
+  const groups = {};
+  it.rows.forEach(r => { const k = category(r); (groups[k] = groups[k] || []).push(r); });
+  const keys = Object.keys(groups).sort((a, b) => {
+    if (a === '__keep__') return 1;
+    if (b === '__keep__') return -1;
+    return (RULE_ORDER.indexOf(a) + 1 || 99) - (RULE_ORDER.indexOf(b) + 1 || 99);
+  });
+  return keys.map(k => `<details class="grp" ${k === '__keep__' ? '' : 'open'}>
+      <summary>${catLabel(k, groups[k].length)}</summary>
+      ${table(groups[k].map(mk).join(''))}</details>`).join('');
+}
+
+function show(){
+  const it = DATA[cur];
+  const hideImg = document.getElementById('hideImg').checked;
+  wrap.innerHTML = `<div class="card">
+    <div class="hd"><b>${esc(it.name)}</b>
+      <span style="color:var(--dim);font-size:13px">清洗前 ${it.n_raw} 短语 → ${
+        it.cols.map(c => `${META[c.v].label} <b style="color:var(--acc)">${c.n}</b>`).join(' / ')}</span></div>
+    ${hideImg ? '' : `<div class="cols">${it.cols.map(c => `
+      <div class="col"><h3>${META[c.v].label} · <em>${c.n}</em> 短语<br>
+        <span style="font-weight:400;font-size:11.5px">${esc(META[c.v].desc)}</span></h3>
+      <img src="data:image/jpeg;base64,${c.img}"></div>`).join('')}</div>`}
+    ${tableRows(it)}
+  </div>`;
+  document.getElementById('pos').innerHTML = `<b>${cur + 1}</b> / ${DATA.length}`;
+  document.getElementById('fill').style.width = ((cur + 1) / DATA.length * 100) + '%';
+  document.getElementById('slider').value = cur;
+  document.getElementById('prev').disabled = cur === 0;
+  document.getElementById('next').disabled = cur === DATA.length - 1;
+  window.scrollTo({top: 0});
+}
+function go(i){ cur = Math.max(0, Math.min(DATA.length - 1, i)); show(); }
+
+const sl = document.getElementById('slider');
+sl.max = DATA.length - 1;
+sl.addEventListener('input', e => go(+e.target.value));
+document.getElementById('prev').addEventListener('click', () => go(cur - 1));
+document.getElementById('next').addEventListener('click', () => go(cur + 1));
+document.getElementById('sortBy').addEventListener('change', show);
+document.getElementById('hideImg').addEventListener('change', show);
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'SELECT' || e.target.type === 'range') return;
+  if (e.key === 'ArrowLeft') go(cur - 1);
+  else if (e.key === 'ArrowRight') go(cur + 1);
+  else if (e.key === 'Home') go(0);
+  else if (e.key === 'End') go(DATA.length - 1);
+});
+show();
+</script></body></html>

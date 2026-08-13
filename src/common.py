@@ -24,6 +24,31 @@ VAGUE = re.compile(
 # 判断短语是否忠实摘抄自 caption 时用的停用词表
 STOP = frozenset("a an the of in on at to for with and or its his her their this that these those".split())
 
+# 抽象属性 / 取景描述的中心词。这类短语描述的是**图像属性**而非图像内容，
+# 天然无法框出实体 —— 实测（6292 对，2026-08-11）命中项精度仅 25.9%，
+# 删掉它们（占 4.1%）能把整体精度从 73.0% 提到 75.0%。
+# 判据取「最后一个实词」而非整串匹配：英语名词短语的中心词在末尾，
+# 所以 `a high-angle studio shot` / `angle shot` / `shot` 都能被同一条规则覆盖。
+# 注意别把 view 之外的实体词放进来 —— `the texture` 这种确实是属性，
+# 但 `a textured fabric` 的中心词是 fabric，不受影响。
+ABSTRACT_HEAD = frozenset("""
+shot shots view views angle angles perspective composition lighting illumination
+atmosphere ambiance ambience mood texture textures contrast focus depth exposure
+saturation tone tones palette aesthetic style styles framing orientation vantage viewpoint
+""".split())
+
+# 整串就是取景术语的（中心词不在上表里，如 `close-up`、`eye level`）
+SHOT_PHRASE = frozenset(["close up", "closeup", "wide angle", "eye level",
+                         "high angle", "low angle", "birds eye", "overhead", "medium"])
+
+
+def is_abstract(phrase):
+    """短语是否描述图像属性/取景方式（而非可定位的实体）。"""
+    cw = content_words(phrase)
+    if not cw:
+        return False
+    return cw[-1] in ABSTRACT_HEAD or norm_phrase(phrase) in SHOT_PHRASE
+
 
 def norm_phrase(s):
     """小写、去标点连字符、压空格 —— 使 `black-framed` 能匹配 caption 里的 `black framed`。"""
