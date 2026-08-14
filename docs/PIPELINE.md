@@ -72,7 +72,7 @@ batch 内任一图异常（坏图、显存抖动）会退化为逐图重试，�
 
 ## 阶段 3 · 清洗
 
-`run/3_clean.sh` → `src/s3_clean.py`，纯 CPU 单进程。五条规则各自可关：
+`run/3_clean.sh` → `src/s3_clean.py`，纯 CPU 单进程。规则各自可关：
 
 | 规则 | 过滤什么 | 关闭参数 |
 |---|---|---|
@@ -80,11 +80,19 @@ batch 内任一图异常（坏图、显存抖动）会退化为逐图重试，�
 | `garbled` | 归一化后无法在源 caption 中找到 —— 解码漂移产物 | `--no-garbled` |
 | `words` | 实词数不足（虚词、标点） | `--min-words 0` |
 | `dup` | 同短语下 IoU>0.9 的重复框 | `--no-dup` |
+| `abstract` | 抽象属性/取景类短语（`the lighting`、`studio shot`） | 默认关，`--abstract` 开 |
+| `xdup` | 跨短语去重：同实词集合且框重合，只留最完整表述 | 默认关，`--xdup` 开 |
+| `fullimg` | 单框贴满整图 —— 与 vague 互补（那条看文本，这条看几何） | 默认关，`--max-cover 0.95` 开 |
+| `edge` | 只压着图像边缘的窄条（解码位置漂移） | 默认关，`--edge` 开 |
 | `area` | 框面积占比过小 | 默认关，`--min-area 0.02` 开 |
 
 默认只开前四条（无损清洗，实测保留约 93%）。
 
-**要做训练数据**用 `TRAIN=1 bash run/3_clean.sh`，等价于额外加 `--min-area 0.02 --min-words 2`。该档实测精度 80.3%、保留 66%，折合约 16 个有效短语/图。各档权衡见 `docs/RESULT.md` 的「过滤规则权衡」表。
+**要做训练数据**用 `TRAIN=1 bash run/3_clean.sh`，等价于额外加
+`--min-words 1 --word-boundary --abstract --xdup --max-cover 0.95 --edge`（rec 档）。
+全量 289 万图实测：19.4 短语/图、25.7 框/图、精度下界 70.1%（1000 图 / 10590 对抽样），
+折合约 13.6 个有效短语/图。注意 `area` 不在 rec 档里 —— 面积过滤能把精度推到 76.3%，
+代价是只剩 69% 保留率，有效信号反而更低。各档权衡见 `docs/RESULT.md` 的「过滤规则权衡」表。
 
 ## 阶段 4 · 校验 + 报告
 

@@ -11,8 +11,10 @@
   dup      同短语下 IoU>0.9 的重复框
   area     框面积占比过小 —— 实测面积 <0.5% 时精度仅 43.8%，>=10% 时 84.6%
 
-默认只开前四条（无损清洗）。要做训练数据再加 --min-area 0.02 --min-words 2，
-该档实测精度 80.3%、保留 66%，折合约 16 个有效短语/图。
+默认只开前四条（无损清洗）。训练数据档见 run/3_clean.sh 的 TRAIN=1 分支（rec 档：
+--min-words 1 --word-boundary --abstract --xdup --max-cover 0.95 --edge），全量实测
+精度 70.1%、19.4 短语/图。旧的 --min-area 0.02 --min-words 2 档已被消融否掉：
+它把有效信号砍掉一半（8.7 短语/图）只换来 1.2pt 精度。
 
 --word-boundary 的由来（重要）：
   garbled 默认用裸子串匹配，于是 `ers`（截自 loafers）、`eyebrow`（截自 eyebrows）

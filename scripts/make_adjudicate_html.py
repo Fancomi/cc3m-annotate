@@ -57,7 +57,7 @@ def main():
     ap.add_argument("--per-stratum", type=int, default=100, help="YES / NO 各抽多少")
     ap.add_argument("--seed", type=int, default=11)
     ap.add_argument("--auto-precision", type=float, default=None,
-                    help="自动判定给出的精度下界（%），默认取 verify 里 YES 比例")
+                    help="自动判定给出的精度下界（%%），默认取 verify 里 YES 比例")
     args = ap.parse_args()
 
     rows = [json.loads(l) for l in open(args.verify)]

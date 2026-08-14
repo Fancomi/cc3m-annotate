@@ -3,6 +3,11 @@
 > 适用：从当前机器迁移到**另一台完全同配置、同目录结构**的开发机。
 > 代码走 git，数据手动拉取。全部命令在**新机器**上执行。
 
+## 迁移状态
+
+**10.52.101.139 → 10.52.101.140 已完成**（数据、rec 档全量重跑、全量校验、审核页面）。
+详见第 9 节。本文件第 1~5 节保留为「下次换机怎么做」的操作手册。
+
 ## 0. 迁移前：本机最后的 git 提交
 
 在旧机器（本机）执行（已完成）：
@@ -99,29 +104,31 @@ python3 -c "import sys; sys.path.insert(0,'src'); from common import is_abstract
 
 ```bash
 cd /root/paddlejob/workspace/env_run/penghaotian/vision_encoder/cc3m-annotate
-bash run/3_clean.sh   # 当前仍是旧规则？→ 先改 run/3_clean.sh 的 TRAIN 分支为 rec 档参数
+TRAIN=1 bash run/3_clean.sh
 ```
 
-rec 档参数（消融结论固化）：
+rec 档参数（消融结论固化，已写进 `run/3_clean.sh` 的 TRAIN 分支）：
 ```bash
 --min-words 1 --word-boundary --abstract --xdup --max-cover 0.95 --edge
 ```
-> 注意：`run/3_clean.sh` 的 TRAIN 分支目前还是 `--min-area 0.02 --min-words 2`（旧档），
-> 迁移后全量重跑前应先把它改成 rec 档（见 `scripts/ablate_rules.py` 的 rec 档定义）。
 
 ### 5.2 全量校验（需要 gemma4）
 
 ```bash
-bash run/4_verify.sh            # 抽 400 图，产出 verify_clean.jsonl + docs/RESULT.md
-SAMPLE=1000 bash run/4_verify.sh  # 加大样本
+# 本机 8001-8008 常驻 8 个 gemma4 sglang 实例（参数与 run/sgl.sh 一致），直接复用：
+PORT_BASE=8001 SAMPLE=1000 bash run/4_verify.sh
 ```
+
+> 别用默认 PORT_BASE=8101：8 卡显存已被那批实例占满（每卡仅剩约 12G），
+> `sgl.sh up` 会 OOM。也**别跑 `sgl.sh down` 或 `run_all.sh`** —— 里面的
+> `pkill -f sglang.launch_server` 会把那批实例一起杀掉。
 
 ### 5.3 gemma 审核（消融审核页面）
 
 ```bash
-python3 scripts/make_rule_ablation_html.py --n 40   # 生成 rule_ablation.html（C vs rec 对照）
-python3 scripts/serve_review.py --dir . --port 8899 # 起服务
-# 浏览器开 http://<新机器>:8899/rule_ablation.html
+python3 scripts/make_rule_ablation_html.py --n 40 --variants "c rec"   # -> rule_ablation.html
+python3 scripts/serve_review.py --dir . --port 8900                    # 8899 已被 /tmp/hdr_capture.py 占用
+# 浏览器开 http://10.52.101.140:8900/rule_ablation.html
 ```
 
 ### 5.4 人工裁决（校准精度下界）
@@ -129,9 +136,10 @@ python3 scripts/serve_review.py --dir . --port 8899 # 起服务
 ```bash
 python3 scripts/make_adjudicate_html.py --verify out/verify_clean.jsonl \
   --out adjudicate_clean.html --per-stratum 100
-python3 scripts/serve_review.py --dir . --port 8899 --save out/human_adjudication_clean.json
-# 答题 → python3 scripts/apply_human_adj.py --json out/human_adjudication_clean.json --dir . \
-#   --auto-precision 69.9   # 用新 RESULT.md 里的精度
+python3 scripts/serve_review.py --dir . --port 8900 --save out/human_adjudication_clean.json
+# 浏览器开 http://10.52.101.140:8900/adjudicate_clean.html（答一题即落盘，可换端口/浏览器续答）
+# 答完 → python3 scripts/apply_human_adj.py --json out/human_adjudication_clean.json --dir . \
+#   --auto-precision 70.1   # 用 RESULT.md 里 rec 档的精度
 ```
 
 ## 6. 目录结构（交接后）
@@ -172,9 +180,18 @@ cc3m-annotate/
 
 ## 7. 关键结论速查（给接手的人）
 
-- **精度下界 71.3%**（1000 图，旧档）；**rec 档预估 69.9%**、9.14 短语/图、有效信号 6.4
+- **rec 档全量实测（289 万图）**：19.4 短语/图、25.7 框/图、精度下界 **70.1%**（1000 图 / 10590 对），
+  有效信号 ≈ 13.6 短语/图。对比旧 C 档：8.7 短语/图、71.3%、有效信号 6.2 ——
+  **rec 档用 1.2pt 精度换来两倍多的有效信号**，这是选它的理由
+- **消融那批数字是子集数字，别当全量用**：消融取 `ground_shard0` 前 20000 条，
+  该区段短语密度只有 11.5/图，而全量均值 23.1/图（同文件尾部 35.5/图，密度沿文件递增）。
+  所以旧文档里的「9.14 短语/图、有效信号 6.4」是子集口径；精度 69.9%（子集）与
+  70.1%（全量）能对上，说明规则的相对结论没问题，但绝对的量级数字要用全量的
 - **清洗规则演进**：`--min-words 2`（删 45% 只为滤 0.5% 碎片，**已证伪**）→ 整词 garbled + min-words 1（B 档）→ +abstract +xdup（C 档）→ **去掉面积过滤 + cover + edge（rec 档，推荐）**
-- **小物体不该删**：小框判 NO 大半是判定器在 20px 尺度看不清（`nose` 大框 5/5 全对、小框屡判 NO），不是数据错
+  - 全量证据支持放宽 min-words：1 词短语精度 69.2%（n=2027），与总体 70.1% 基本齐平
+- **小物体不该删（仍待人工裁决确认）**：全量看小框确实低分（<0.5% 面积 → 47.8%，
+  0.5-2% → 62.8%），但先前观察是判定器在 20px 尺度看不清（`nose` 大框 5/5 全对、小框屡判 NO）。
+  这是 5.4 人工裁决要回答的第一个问题
 - **消融结论**：`ratio`(-0.7pt) 与 `nbox`(-0.4pt) 精度反降被否；`cover`(+0.8pt)、`edge`(+0.1pt) 纳入
 - 全部数字来自同判定器对照，精度是同判定器下的相对值，不是绝对真值（确认偏误下界）
 
@@ -184,3 +201,27 @@ cc3m-annotate/
 - `/dev/shm/models` 重启后清空，sglang 首次启动自动从 `~/models` 拷贝（3 分钟）
 - 校验精度是下界：判定器 gemma4 与 caption 同模型族，存在确认偏误；可靠的是同判定器下的相对比较
 - CC3M 原 caption 不能当真值（网页 alt-text，含视觉不可见信息）
+- `out/verify_*.jsonl` 是**追加+按 (path, phrase) 续跑**的（`src/batch.py`）。
+  换了清洗档位重跑校验前必须把旧文件挪走，否则新旧档判定会混进同一个文件、
+  `report.py` 会算出混合口径的精度
+
+## 9. 本次迁移记录（139 → 140）
+
+- **数据**：旧机 `bdhttp3.py` 文件服务（`http://10.52.101.139:8555`，根目录 = `penghaotian/`），
+  aria2c 多连接拉取 `out/` 58 个文件共 10.83 GiB + `logs/` 34 个文件 36.6 MiB，
+  逐文件比对 Content-Length 与本地字节数，全部一致；行数复核
+  caption/ground 各 2,894,191、clean 2,894,189
+- **环境**：`envs/sglang__0.5.12`、`models/gemma-4-26B-A4B-it`、`datas/cc3m-tsv`（images 250G）
+  新机原本就有；`/dev/shm/models/gemma-4-26B-A4B-it` 已在。
+  **缺 `envs/dam` 与 `models/Florence-2-large`**（只有阶段2 grounding 要用，产出已全量迁完）。
+  要重跑阶段2 就跑 `bash install.sh`，它会建 dam 环境并拉 Florence-2-large ——
+  别用 HTTP 拷 venv，符号链接和权限过不去
+- **rec 档全量重跑**：旧 C 档产出保留为 `out/clean_c_old/`（2.0G），
+  新 `out/clean/` 3.6G。旧校验基线保留为 `out/verify_clean_c_old.jsonl`（71.3%）
+- **全量校验**：复用 8001-8008，10590 对 1.9 分钟跑完，YES=7425 / NO=3165，
+  无 ERROR / UNPARSED / TOO_SMALL
+- **审核页面**：`rule_ablation.html`（40 图，c vs rec）、`adjudicate_clean.html`（YES/NO 各抽 100），
+  服务在 `10.52.101.140:8900`（复用本机 http.server 的 IP 白名单 ACL，非白名单 403）
+- 顺手修的两处：`run/3_clean.sh` 的 TRAIN 分支（旧档 → rec 档，交接文档里留的待办）、
+  `scripts/make_adjudicate_html.py` 的 `--help` 崩溃（help 文本里裸 `%`）
+
