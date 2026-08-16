@@ -4,7 +4,8 @@
 续传只跳过成功条目（`common.is_ok`），error 占位行会被重试。
 """
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from itertools import islice
 
 from common import load_done, open_append, rec_key, write_jsonl
 
@@ -21,6 +22,12 @@ def run_pool(items, work, out_path, tag, workers=16, every=200, key=rec_key):
     """并发跑 work(item)->rec，结果追加写 out_path。返回实际处理条数。
 
     已完成的条目在此过滤，所以重跑同一条命令即为续跑。
+
+    有界提交（别改回 ex.map）：`ex.map` 会先把全部任务 submit 完才产出第一个结果。
+    任务量小时无所谓，但全量校验有 3000 万条 —— 实测跑 12 分钟，磁盘上一行都没有、
+    结果全攒在 Future 里，内存以 4 GiB/min 涨，中途挂掉全部白跑。改成只保留
+    workers*8 个在飞的任务，完成即落盘，内存恒定、进度可见、随时可续。
+    代价是输出顺序变成完成顺序而非输入顺序 —— 下游一律按主键索引，不依赖顺序。
     """
     done = load_done(out_path, key)
     todo = [it for it in items if key(it) not in done]
@@ -32,11 +39,16 @@ def run_pool(items, work, out_path, tag, workers=16, every=200, key=rec_key):
     n = 0
     try:
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            for rec in ex.map(work, todo):
-                write_jsonl(fo, rec)
-                n += 1
-                if n % every == 0:
-                    report(tag, n, len(todo), t0)
+            src = iter(todo)
+            fs = {ex.submit(work, it) for it in islice(src, max(workers * 8, 256))}
+            while fs:
+                ready, fs = wait(fs, return_when=FIRST_COMPLETED)
+                for f in ready:
+                    write_jsonl(fo, f.result())
+                    n += 1
+                    if n % every == 0:
+                        report(tag, n, len(todo), t0)
+                fs |= {ex.submit(work, it) for it in islice(src, len(ready))}
     finally:
         fo.close()
     print(f"[{tag}] DONE {n} in {(time.perf_counter()-t0)/60:.1f}min", flush=True)

@@ -226,6 +226,7 @@ cc3m-annotate/
 
 ## 9. 本次迁移记录（139 → 140）
 
+
 - **数据**：旧机 `bdhttp3.py` 文件服务（`http://10.52.101.139:8555`，根目录 = `penghaotian/`），
   aria2c 多连接拉取 `out/` 58 个文件共 10.83 GiB + `logs/` 34 个文件 36.6 MiB，
   逐文件比对 Content-Length 与本地字节数，全部一致；行数复核
@@ -244,3 +245,28 @@ cc3m-annotate/
 - 顺手修的两处：`run/3_clean.sh` 的 TRAIN 分支（旧档 → rec 档，交接文档里留的待办）、
   `scripts/make_adjudicate_html.py` 的 `--help` 崩溃（help 文本里裸 `%`）
 
+## 10. 全量 gemma 校验（进行中）
+
+给**全部** 3030 万对 (短语, 框) 打 YES/NO，不再是抽样估精度 —— 目的是拿到逐对标签，
+可据此筛出高精度子集。
+
+```bash
+# 注意：不能用 run/4_verify.sh —— 它会写 out/verify_clean.jsonl（1000 图基线，
+# 人工裁决就挂在这个文件上）并重生成 docs/RESULT.md（会抹掉第 5 节）
+URLS8=$(python3 -c "print(','.join(f'http://127.0.0.1:{p}/v1' for p in range(8001,8009)))")
+setsid nohup ~/envs/sglang__0.5.12/bin/python -u src/s4_verify.py \
+  --in-dir out/clean --pattern 'clean_shard*.jsonl' --out out/verify_full.jsonl \
+  --urls "$URLS8" --model /dev/shm/models/gemma-4-26B-A4B-it \
+  --sample 3000000 --max-boxes 12 --concurrency 128 > logs/verify_full.log 2>&1 &
+```
+
+- 规模 30,303,579 对（286.9 万图 × 平均 10.5 个短语，`--max-boxes 12` 截断后）
+- 实测 12ms/对 ≈ 83 对/秒，8 卡 GPU 利用率 32~89%，**ETA 约 99 小时（4.1 天）**
+- 断点续传：中断后重跑同一条命令即可，按 (path, phrase) 跳过已完成
+- 判定条件必须与已校准的那批一致（pad 0.12、maxside 512、同 prompt），
+  否则 70.1% / 79.9% 这两个数字对不上，别为了提速改这些
+
+**这批标签能干什么、不能干什么**（依据第 5 节的人工裁决）：
+按 YES 筛，保留 70.1% 的对、精度升到 96.0%，但会误删「判 NO 实际正确」的那 12.6%
+（≈2.4 短语/图）。小框上判定器误否率 60~64%，所以**小框的 NO 不该直接删** ——
+更稳的用法是把 verdict 当置信度分层，而不是当硬过滤。
