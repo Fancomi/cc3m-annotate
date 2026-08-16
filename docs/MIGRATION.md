@@ -59,6 +59,7 @@ tar czf cc3m_out.tar.gz out/caption out/ground out/clean out/ab \
 | `out/ab/` | 165M | 消融实验全部档位 + 各档 verify | 重建约 1 小时 |
 | `out/verify_clean.jsonl` | 1.8M | 阶段4 抽样校验结果（1000 图） | 重跑 2 分钟 |
 | `out/verify_clean_s400.jsonl` | 708K | 400 图版备份 | 可重建 |
+| `out/human_adjudication_clean.json` | 21K | **人工裁决 100 条**（第 5 节精度校准的唯一依据） | **重建不了**，得重新人工标 |
 
 **可选**：`logs/`（各阶段日志，方便查历史）、`rule_ablation.html`（3.1M，消融审核页面）。
 
@@ -127,20 +128,33 @@ PORT_BASE=8001 SAMPLE=1000 bash run/4_verify.sh
 
 ```bash
 python3 scripts/make_rule_ablation_html.py --n 40 --variants "c rec"   # -> rule_ablation.html
-python3 scripts/serve_review.py --dir . --port 8900                    # 8899 已被 /tmp/hdr_capture.py 占用
+# 8900 服务（8899 已被 /tmp/hdr_capture.py 占用）。本机 http.server 带 IP 白名单
+# （只有 GPU 机器池的 BNS + 127.0.0.1），办公机 IP 不在里面会 403，必须显式放行：
+NETS=$(python3 -c "print(','.join(f'172.24.{o}.0/24' for o in range(16,32)))")
+python3 scripts/serve_review.py --dir . --port 8900 \
+  --save out/human_adjudication_clean.json --allowednet "$NETS"
 # 浏览器开 http://10.52.101.140:8900/rule_ablation.html
 ```
+
+> ACL 只接受 /24~/32 掩码，给 /8 或 /16 会让它在后台线程里 `sys.exit`，
+> 结果白名单变空、**所有请求包括 127.0.0.1 都 403**。要放宽一段就逐个 /24 列出来。
+> 别用别的文件服务（如 `bdhttp3.py`）打开裁决页 —— 那种服务没有 `/save` 端点，
+> 裁决只会留在浏览器 localStorage 里。页面现在会在页首弹红色告警条提示这种情况。
 
 ### 5.4 人工裁决（校准精度下界）
 
 ```bash
 python3 scripts/make_adjudicate_html.py --verify out/verify_clean.jsonl \
-  --out adjudicate_clean.html --per-stratum 100
-python3 scripts/serve_review.py --dir . --port 8900 --save out/human_adjudication_clean.json
+  --out adjudicate_clean.html --per-stratum 50 \
+  --save-url http://10.52.101.140:8900/save
+# 服务同 5.3（要带 --allowednet 放行办公机网段）
 # 浏览器开 http://10.52.101.140:8900/adjudicate_clean.html（答一题即落盘，可换端口/浏览器续答）
 # 答完 → python3 scripts/apply_human_adj.py --json out/human_adjudication_clean.json --dir . \
 #   --auto-precision 70.1   # 用 RESULT.md 里 rec 档的精度
 ```
+
+`--save-url` 写绝对地址是为了页面从别的 origin 打开时也能落盘（`text/plain` 请求头
+避开 serve_review.py 不处理的 CORS 预检）。落盘失败时页首会弹红条，不再是页脚一行小字。
 
 ## 6. 目录结构（交接后）
 
@@ -189,9 +203,14 @@ cc3m-annotate/
   70.1%（全量）能对上，说明规则的相对结论没问题，但绝对的量级数字要用全量的
 - **清洗规则演进**：`--min-words 2`（删 45% 只为滤 0.5% 碎片，**已证伪**）→ 整词 garbled + min-words 1（B 档）→ +abstract +xdup（C 档）→ **去掉面积过滤 + cover + edge（rec 档，推荐）**
   - 全量证据支持放宽 min-words：1 词短语精度 69.2%（n=2027），与总体 70.1% 基本齐平
-- **小物体不该删（仍待人工裁决确认）**：全量看小框确实低分（<0.5% 面积 → 47.8%，
-  0.5-2% → 62.8%），但先前观察是判定器在 20px 尺度看不清（`nose` 大框 5/5 全对、小框屡判 NO）。
-  这是 5.4 人工裁决要回答的第一个问题
+- **小物体不该删（人工裁决已确认）**：自动判定看到的「小框低分」（<0.5% 面积 → 47.8%，
+  0.5-2% → 62.8%）是判定器在 20px 尺度看不清造成的，不是标注错。人工按同样分桶重新
+  加权后 <0.5% 是 81.0%、0.5-2% 是 85.1%，与大框（80.0%）齐平；判定器误否率在小框上
+  60~64%、大框只有 19%。详见 `docs/RESULT.md` 5.1。**不加面积过滤的决定成立。**
+- **人工裁决结论（100 个样本，YES/NO 各 50）**：a=P(真存在|判YES)=96.0%、
+  b=P(真存在|判NO)=42.0%，还原真实精度 **79.9%**（95% 区间 69.5–86.0%），
+  比自动下界 70.1% 高 9.8pt —— 判定器偏保守，70.1% 可放心当下界用。
+  判定器自身准确率 84.6%
 - **消融结论**：`ratio`(-0.7pt) 与 `nbox`(-0.4pt) 精度反降被否；`cover`(+0.8pt)、`edge`(+0.1pt) 纳入
 - 全部数字来自同判定器对照，精度是同判定器下的相对值，不是绝对真值（确认偏误下界）
 

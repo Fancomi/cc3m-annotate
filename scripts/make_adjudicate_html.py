@@ -58,7 +58,13 @@ def main():
     ap.add_argument("--seed", type=int, default=11)
     ap.add_argument("--auto-precision", type=float, default=None,
                     help="自动判定给出的精度下界（%%），默认取 verify 里 YES 比例")
+    ap.add_argument("--save-url", default="/save",
+                    help="落盘端点。默认同源 /save，要求页面必须从 serve_review.py 打开；"
+                         "若可能从别的文件服务（如 bdhttp3.py）打开，填绝对地址 "
+                         "http://<开发机>:8900/save，跨源也能存")
     args = ap.parse_args()
+    save_url = args.save_url
+    load_url = save_url[:-len("/save")] + "/load" if save_url.endswith("/save") else "/load"
 
     rows = [json.loads(l) for l in open(args.verify)]
     if args.auto_precision is None:
@@ -150,9 +156,9 @@ code{{background:#20242c;padding:1px 5px;border-radius:3px;font-size:12px}}
 {N_NO/(N_YES+N_NO)*100:.1f}%，随机抽会导致 NO 样本太少估不准。统计时会按总体权重还原。<br>
 <b>判断标准</b>：红框圈出的区域里，能否清楚看到这个短语所指的东西？框大致对上即可，不必像素级精确。
 <b>页面刻意不显示 gemma4 的裁决</b>，避免锚定；判完每题可展开对照。<br>
-<b>保存</b>：每答一题自动写到开发机 <code>out/human_adjudication.json</code>（页脚显示"已存盘 N"）。
-关页面、换端口、换浏览器都能续答。若页脚显示"仅存浏览器"，说明没用
-<code>scripts/serve_review.py</code> 起服务，那时只有 localStorage，换 origin 会丢。
+<b>保存</b>：每答一题自动 POST 到 <code>{save_url}</code> 写进开发机磁盘（页脚显示"已存盘 N"）。
+关页面、换端口、换浏览器都能续答。若页脚变红、页首出现红色告警条，说明<b>没存上</b>，
+此时只有 localStorage —— 换成 <code>scripts/serve_review.py</code> 提供的地址重开本页即可补存。
 </div>
 <div class="wrap"><div id="qs"></div>
 <div id="done"><h2 style="margin-top:0">裁决完成</h2><div id="result"></div>
@@ -165,6 +171,7 @@ code{{background:#20242c;padding:1px 5px;border-radius:3px;font-size:12px}}
 <button class="s" onclick="jump(-1)">← 上一题</button></div>
 <script>
 const DATA = {payload};
+const SAVE_URL = {save_url!r}, LOAD_URL = {load_url!r};
 const KEY = "cc3m_human_adj_v1";
 let ans = JSON.parse(localStorage.getItem(KEY) || "{{}}");
 let cur = 0;
@@ -272,19 +279,35 @@ function payload(){{
 }}
 // 落盘到开发机磁盘。localStorage 绑定 origin，换端口/浏览器就丢；
 // 服务端落盘才能真正保住，且免去把 JSON 从本地机传回开发机。
+// Content-Type 用 text/plain 是有意的：这样跨源 POST 属于"简单请求"，不触发
+// OPTIONS 预检（serve_review.py 不处理 OPTIONS）。服务端只做 json.loads，不看类型。
 function push(){{
   clearTimeout(svTimer);
   svTimer=setTimeout(()=>{{
     setSv('保存中…','var(--dim)');
-    fetch('/save',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    fetch(SAVE_URL,{{method:'POST',headers:{{'Content-Type':'text/plain'}},
       body:JSON.stringify(payload())}})
-      .then(r=>r.json())
-      .then(j=>setSv(j.ok?('已存盘 '+j.count):'存盘失败', j.ok?'var(--ok)':'var(--bad)'))
-      .catch(()=>setSv('仅存浏览器(未用 serve_review.py?)','var(--warn)'));
+      .then(r=>r.ok?r.json():Promise.reject(r.status))
+      .then(j=>{{ setSv(j.ok?('已存盘 '+j.count):'存盘失败','var(--ok)'); warn(false); }})
+      .catch(e=>{{ setSv('未落盘('+e+')','var(--bad)'); warn(true); }});
   }},250);
 }}
+// 存盘失败必须显眼 —— 之前只在页脚显示一行小字，标了几十题才发现没存上
+function warn(on){{
+  let b=document.getElementById('svwarn');
+  if(!on){{ if(b) b.remove(); return; }}
+  if(b) return;
+  b=document.createElement('div'); b.id='svwarn'; b.className='note';
+  b.style.cssText='background:#3a1518;border-left-color:var(--bad);color:#ffc9c9;'
+    +'position:sticky;top:0;z-index:30;margin:0';
+  b.innerHTML='<b>裁决没有存到开发机磁盘</b>（只在这个浏览器的 localStorage 里）。'
+    +'落盘地址 <code>'+SAVE_URL+'</code> 不可达 —— 通常是页面不是从 '
+    +'<code>scripts/serve_review.py</code> 打开的。请换成它提供的地址重开本页，'
+    +'已答的题会自动带过去。';
+  document.body.insertBefore(b, document.body.firstChild);
+}}
 function pull(){{
-  return fetch('/load').then(r=>r.json()).then(j=>{{
+  return fetch(LOAD_URL).then(r=>r.json()).then(j=>{{
     let n=0;
     (j.answers||[]).forEach(x=>{{
       if(x.human){{ ans[x.path+"|"+x.phrase]=x.human; n++; }}
