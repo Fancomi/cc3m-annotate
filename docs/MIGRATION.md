@@ -262,7 +262,7 @@ setsid nohup ~/envs/sglang__0.5.12/bin/python -u src/s4_verify.py \
 
 - 规模 30,303,579 对（286.9 万图 × 平均 10.56 个短语，`--max-boxes 12` 截断后）
 - **实测 65.1 小时跑完**（3906 分钟，8ms/对 ≈ 129 对/秒），8 卡 GPU 利用率 32~89%，
-  客户端单核 94%、RSS 37 GiB。产出 `out/verify_full.jsonl` 6.8G
+  客户端单核 94%、RSS 37 GiB。产出 `out/verify_full.jsonl` 6.4G
 - 断点续传：中断后重跑同一条命令即可，按 (path, phrase) 跳过已完成
 - 判定条件必须与已校准的那批一致（pad 0.12、maxside 512、同 prompt），
   否则 70.1% / 79.9% 这两个数字对不上，别为了提速改这些
