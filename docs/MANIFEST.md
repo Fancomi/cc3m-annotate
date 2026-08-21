@@ -15,7 +15,7 @@
 | `gemma_verify/` | 6.4G | 4 | gemma4 审核结果（覆盖 40.8% 的框，见下），见下 |
 | `verdict/` | 1.9G | 4 | **逐框对齐的 verdict 边车** —— 未审位置显式为 `null`，先读这个 |
 | `ablation/` | 165M | — | 清洗规则消融：12 个档位产出 + 11 份对照 verify |
-| `docs/` | 48K | — | MANIFEST / PIPELINE / RESULT / DECISIONS / MIGRATION / INSTALL |
+| `docs/` | 64K | — | MANIFEST / PIPELINE / RESULT / DECISIONS / MIGRATION / INSTALL |
 
 合计 21G。
 
