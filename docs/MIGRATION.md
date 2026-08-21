@@ -254,7 +254,8 @@ cc3m-annotate/
 # 注意：不能用 run/4_verify.sh —— 它会写 out/verify_clean.jsonl（1000 图基线，
 # 人工裁决就挂在这个文件上）并重生成 docs/RESULT.md（会抹掉第 5 节）
 URLS8=$(python3 -c "print(','.join(f'http://127.0.0.1:{p}/v1' for p in range(8001,8009)))")
-setsid nohup ~/envs/sglang__0.5.12/bin/python -u src/s4_verify.py \
+source run/env.sh          # 取 $PY_SGL；别写 ~/envs/...，这台机器的环境在 env_run/penghaotian/envs/ 下
+setsid nohup "$PY_SGL" -u src/s4_verify.py \
   --in-dir out/clean --pattern 'clean_shard*.jsonl' --out out/verify_full.jsonl \
   --urls "$URLS8" --model /dev/shm/models/gemma-4-26B-A4B-it \
   --sample 3000000 --max-boxes 12 --concurrency 128 > logs/verify_full.log 2>&1 &
@@ -348,4 +349,44 @@ ERROR 那 1195 条重跑同一命令会自动重试，占比 0.004%，不重跑�
 剩下 59.2% 的框**没有 verdict**，硬过滤会把它们全部误伤成「未标注」。
 
 若真要逐对标签，得把 `run_pool` 主键改成 `(path, phrase, box_idx)` 并去掉
-`--max-boxes` 上限，补跑剩下约 4400 万对，按实测 129 对/秒约 95 小时。
+`--max-boxes` 上限，补跑剩下约 4400 万对。吞吐实测（`--by-image` 变体、多进程分片）：
+单进程 128 并发 82/s、4 进程 120/s、8 进程 157/s，按图打包一次解码**无收益**，
+GPU 均值约 60% —— 相对生产的 129/s 只有 1.2 倍余量，补跑仍需约 78 小时。
+所以「太耗时」的结论成立，但**不必补跑**，见第 11 节。
+
+## 11. verdict 边车（消除「NO」与「未审」的歧义）
+
+`verify_full.jsonl` 主键是 `(path, phrase)`，下游拿它过滤时无法区分
+「判 NO」与「根本没审」—— 这是这批数据唯一的歧义来源。边车把它摊平成与 clean
+**逐框对齐**的文件，每个框位显式给一个槽，未审写 `null`：
+
+```bash
+python3 scripts/make_verdict_sidecar.py     # 默认 out/clean + out/verify_full.jsonl → out/verdict/
+```
+
+产出 `out/verdict/verdict_shard{0-7}.jsonl`，1.9G，**2,894,189 行与 clean 一一对应**
+（含 grounding 为空的图）。按 `path` 关联，框按下标对齐：
+
+```json
+{"path": ".../001478524.jpg", "n_pair": 3, "n_audited": 2,
+ "verdict": {"The text": ["YES"], "The characters": ["NO", null]}}
+```
+
+纯 CPU 两趟、4 分钟（索引 1.9min + 改写 2.2min），峰值内存约 12G。
+
+自检结果（脚本末尾会打印，可复现）：
+
+- 框位 74,289,118，有 verdict 30,303,579（**40.79%**），`null` 43,985,539
+- **verify 里对不上 clean 的 (path,phrase) = 0**，且 30,303,579 行 → 30,303,579 个唯一主键
+  （无重复主键，说明那次全量跑没有因续传产生重复行）
+- 被审短语的 k 分布恰好落在 0~11、被审框的 `box_idx` 分布恰好只有 `{0}` ——
+  从数据侧独立验证了第 10 节说的两处截断，不是靠读代码推断的
+- verdict 计数与第 10 节完全一致（YES 21,175,099 / NO 9,127,032 / ERROR 1,195 /
+  TOO_SMALL 252 / UNPARSED 1）
+
+k 分布同时给出「有第 k+1 个短语的图数」：k=0 是 2,868,984，单调降到 k=11 的 2,104,554。
+
+**为什么这就够了，不需要补抽样**：`k`（短语在图内序号）和 `box_idx` 是从 clean
+直接数出来的确定性特征，零成本，而且已经在被审的那 40.8% 上标定出精度曲线
+（k=0 82.44% → k=11 62.89%，见第 10 节）。下游按 (k, box_idx, 面积桶) 给全部
+7429 万对加权即可，不需要任何额外推理，也不需要对未审区间做点估计。
