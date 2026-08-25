@@ -40,6 +40,9 @@ bash run/4_verify.sh             # 阶段4  抽样校验 + 报告     约 10 分
 
 所有阶段都断点续传，且**只跳过成功条目** —— 失败的会在重跑时自动重试。中断后重跑同一条命令即可。
 
+同一套代码也能跑 CC12M（1097 万图），加 `DATASET=cc12m` 即可，产出走 `out_cc12m/`。
+先解包 wds tar，运行手册见 `docs/CC12M.md`。
+
 ## 产出
 
 ```
@@ -85,6 +88,9 @@ docs/
   INSTALL.md        环境细节、版本约束原因、常见故障
   PIPELINE.md       各阶段输入输出与参数含义
   DECISIONS.md      选型对照数据与被淘汰的方案
+  CC12M.md          在 CC12M 上跑同一套流程（解包 + 差异 + 踩坑）
+  MANIFEST.md       数据交付卡（口径、覆盖率、下游能怎么用）
+  MIGRATION.md      换机操作手册 + 历次迁移记录
 legacy/             早期三方对照实验（Florence-2 三级caption / NOVIC / Qwen），仅供复现
 ```
 
