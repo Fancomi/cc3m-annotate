@@ -21,7 +21,7 @@ from common import DENSE, SHORT, ask_vlm, b64, make_clients, round_robin, take_s
 def load_tsv(tsv_dir, limit_per_tsv=0):
     """读全部 tsv，产出待办条目。tsv 编号即 shard 字段。"""
     items = []
-    for tf in sorted(glob.glob(os.path.join(tsv_dir, "cc3m-train-*.tsv"))):
+    for tf in sorted(glob.glob(os.path.join(tsv_dir, "*-train-*.tsv"))):
         shard = int(os.path.basename(tf).split("-")[-1].split(".")[0])
         with open(tf) as f:
             for i, line in enumerate(f):

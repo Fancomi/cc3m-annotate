@@ -11,13 +11,34 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$REPO/src"
+
+# ---------------- 数据集 ----------------
+# 一套代码跑两个数据集：DATASET=cc3m（默认，行为与从前完全一致）或 cc12m。
+# tsv 每行 `图片绝对路径 \t 原始 caption`；阶段1 按 `*-train-*.tsv` 匹配，两边同构。
+# cc12m 的图片与 tsv 由 scripts/wds_extract.py 从 wds tar 解出，
+# 坐标语义与 cc3m 相同（原图像素，解包不做任何缩放）。
+: "${DATASET:=cc3m}"
+case "$DATASET" in
+  cc3m)
+    : "${TSV_DIR:=$WORK_ROOT/datas/cc3m-tsv/_shards}"   # 576 个 tsv 共 2894191 行
+    : "${N_IMG:=2894191}"
+    : "${OUT:=$REPO/out}"
+    ;;
+  cc12m)
+    : "${TSV_DIR:=$WORK_ROOT/datas/cc12m/_shards}"      # 2176 个 tsv 共约 1097 万行
+    : "${N_IMG:=10968539}"
+    : "${OUT:=$REPO/out_cc12m}"
+    : "${LOGS:=$REPO/logs/cc12m}"
+    # 本机 8001-8008 常驻 8 个 gemma4 实例、显存已占满起不了第二批，直接复用。
+    : "${PORT_BASE:=8001}"
+    ;;
+  *) echo "未知 DATASET=$DATASET（支持 cc3m / cc12m）" >&2; exit 1 ;;
+esac
+CC3M_TSV="${CC3M_TSV:-$TSV_DIR}"    # 旧变量名，保留兼容
+
 OUT="${OUT:-$REPO/out}"
 LOGS="${LOGS:-$REPO/logs}"
 mkdir -p "$OUT" "$LOGS"
-
-# ---------------- 数据集 ----------------
-# _shards/*.tsv 每行 `图片绝对路径 \t cc3m 原始 caption`，576 个 tsv 共 2894191 行
-: "${CC3M_TSV:=$WORK_ROOT/datas/cc3m-tsv/_shards}"
 
 # ---------------- python 解释器 ----------------
 # 两套环境不能混用：F2 依赖 transformers 4.46（新版删了它需要的私有 API），
