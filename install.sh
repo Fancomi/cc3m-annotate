@@ -32,6 +32,18 @@ uvpip() {
   "$UV" pip install --python "$py" "${idx[@]}" "$@"
 }
 
+# 建 venv。`uv venv` 遇到已存在的目录会直接报错，所以半成品环境会卡住重跑；
+# 但也不能无脑 --clear —— envs/sglang__0.5.12 上正跑着 8 个常驻实例，
+# 清掉就把服务连根拔了。折中：标志模块能 import 就当成品复用，否则视为半成品重建。
+mkvenv() {
+  local dir="$1" pyver="$2" marker="$3"
+  if [ -x "$dir/bin/python" ] && "$dir/bin/python" -c "import $marker" 2>/dev/null; then
+    log "复用已有环境 $dir（import $marker 通过）"
+    return
+  fi
+  "$UV" venv --clear --python "$pyver" "$dir"
+}
+
 # ---------------- step: 系统依赖 ----------------
 step_system() {
   log "apt 依赖"
@@ -48,7 +60,7 @@ step_system() {
 step_env_f2() {
   local V="$ENVS_DIR/dam"
   log "建 F2 环境 $V (python 3.10)"
-  "$UV" venv --python 3.10 "$V"
+  mkvenv "$V" 3.10 transformers
   uvpip "$V/bin/python" torch==2.6.0 torchvision==0.21.0 \
     --index-url https://download.pytorch.org/whl/cu124
   uvpip "$V/bin/python" \
@@ -66,7 +78,7 @@ print('transformers', transformers.__version__)"
 step_env_sgl() {
   local V="$ENVS_DIR/sglang__0.5.12"
   log "建 sglang 环境 $V (python 3.12)"
-  "$UV" venv --python 3.12 "$V"
+  mkvenv "$V" 3.12 sglang
   uvpip "$V/bin/python" "sglang[all]==0.5.12" || {
     echo "  pip 装 sglang 失败（多为网络问题）。源码编译见 docs/INSTALL.md" >&2
     return 1
@@ -76,14 +88,22 @@ step_env_sgl() {
 }
 
 # ---------------- step: 模型权重 ----------------
+# 网络：默认走 hf-mirror。若它不通（10.52.101.140 上实测直连 hf-mirror 超时），
+# 改走代理直连 huggingface.co：
+#   HF_ENDPOINT=https://huggingface.co http_proxy=http://agent.baidu.com:8188 \
+#   https_proxy=$http_proxy bash install.sh weights
 step_weights() {
-  command -v huggingface-cli >/dev/null || "$UV" tool install -q huggingface_hub[cli] || true
+  # huggingface_hub 0.35 起 `huggingface-cli` 只剩一句弃用提示、不再下载任何东西，
+  # 新入口叫 `hf`。两个名字都可能存在，按能用的挑。
+  command -v hf >/dev/null || command -v huggingface-cli >/dev/null \
+    || "$UV" tool install -q huggingface_hub[cli] || true
+  local CLI; CLI="$(command -v hf || command -v huggingface-cli)"
   local HF="${HF_ENDPOINT:-https://hf-mirror.com}"
   fetch() {  # $1=repo  $2=本地目录名
     local d="$MODELS_DIR/$2"
     [ -f "$d/config.json" ] && { log "$2 已存在，跳过"; return; }
     log "下载 $1 -> $d"
-    HF_ENDPOINT="$HF" huggingface-cli download "$1" --local-dir "$d" --quiet \
+    HF_ENDPOINT="$HF" "$CLI" download "$1" --local-dir "$d" --quiet \
       || die "下载 $1 失败；可手动放到 $d"
   }
   fetch microsoft/Florence-2-large Florence-2-large
