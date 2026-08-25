@@ -23,7 +23,14 @@ die()  { echo -e "\033[1;31m[fail]\033[0m $*" >&2; exit 1; }
 done_p() { [ -f "$STAMP/$1.done" ]; }
 mark()   { touch "$STAMP/$1.done"; }
 
-uvpip() { "$UV" pip install --python "$1" --index-url "$PIP_INDEX" "${@:2}"; }
+# 调用方自带 --index-url 时不再叠加默认镜像 —— uv 的 --index-url 不允许出现两次，
+# 叠加会让整条 uv pip install 直接报错退出（torch 的 cu124 索引就是这么静默没装上的）。
+uvpip() {
+  local py="$1"; shift
+  local idx=(--index-url "$PIP_INDEX")
+  for a in "$@"; do [ "$a" = "--index-url" ] && { idx=(); break; }; done
+  "$UV" pip install --python "$py" "${idx[@]}" "$@"
+}
 
 # ---------------- step: 系统依赖 ----------------
 step_system() {
@@ -114,7 +121,10 @@ STEPS=(system env_f2 env_sgl weights check)
 export MODELS_DIR
 run_step() {
   done_p "$1" && { log "$1 已完成，跳过"; return; }
-  "step_$1" && mark "$1"
+  # 不写 `"step_$1" && mark`：`&&` 会在整个函数体里关掉 set -e，
+  # 步骤中途某条命令失败也照样往下跑，最后按自检的返回码打上 .done。
+  "step_$1"
+  mark "$1"
 }
 
 if [ $# -gt 0 ]; then
