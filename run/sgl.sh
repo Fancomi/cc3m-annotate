@@ -44,10 +44,20 @@ up)
   exit 1
   ;;
 down)
-  pkill -f "sglang.launch_server" 2>/dev/null || true
+  # 只杀 PORT_BASE..PORT_BASE+NUM_GPU-1 这一段。原先是无条件
+  # `pkill -f sglang.launch_server`，会把别人常驻的那批一起带走
+  # （本机 8001-8008 常驻 8 个实例，被误杀过；docs/MIGRATION.md 5.2 的告警就是为此）。
+  # 端口号后带一个空格，避免 8101 匹配到 81011。
+  pids=""
+  for i in $(seq 0 $((NUM_GPU - 1))); do
+    pids="$pids $(pgrep -f "sglang.launch_server .*--port $((PORT_BASE + i)) " 2>/dev/null || true)"
+  done
+  pids="$(echo $pids)"
+  [ -z "$pids" ] && { log "$PORT_BASE-$((PORT_BASE + NUM_GPU - 1)) 段没有在跑的实例"; exit 0; }
+  kill $pids 2>/dev/null || true
   sleep 5
-  pkill -9 -f "sglang.launch_server" 2>/dev/null || true
-  log "已停止全部 sglang 实例"
+  kill -9 $pids 2>/dev/null || true
+  log "已停止 $PORT_BASE-$((PORT_BASE + NUM_GPU - 1)) 段的 sglang 实例（pid: $pids）"
   ;;
 status)
   log "就绪 $(ready_count)/$NUM_GPU  进程 $(pgrep -fc 'sglang.launch_server' || echo 0)"

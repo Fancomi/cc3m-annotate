@@ -16,6 +16,10 @@ ground) IN_DIR="$OUT/ground"; PAT="ground_shard*.jsonl" ;;
 *)      die "IN 只能是 clean 或 ground" ;;
 esac
 VERIFY="$OUT/verify_$IN.jsonl"
+# 报告路径必须跟着数据集走：写死 docs/RESULT.md 的话，跑一次 DATASET=cc12m
+# 就会把 cc3m 那份覆盖掉，而它第 5 节的人工裁决结论重建不了。
+RESULT="$REPO/docs/RESULT.md"
+[ "$DATASET" != cc3m ] && RESULT="$REPO/docs/RESULT_$DATASET.md"
 
 need_file "$IN_DIR" "阶段$([ "$IN" = clean ] && echo 3 || echo 2) 未产出"
 
@@ -27,6 +31,6 @@ log "阶段4 校验 $IN（抽 $SAMPLE 图）-> $VERIFY"
 "$PY_SGL" "$SRC/s4_verify.py" --in-dir "$IN_DIR" --pattern "$PAT" \
   --out "$VERIFY" --urls "$URLS" --model "$GEMMA" --sample "$SAMPLE" 2>&1 | tee "$LOGS/verify.log"
 
-log "生成报告 -> $REPO/docs/RESULT.md"
+log "生成报告 -> $RESULT"
 "$PY_ANY" "$SRC/report.py" --cap-dir "$OUT/caption" --ground-dir "$OUT/ground" \
-  --clean-dir "$OUT/clean" --verify "$VERIFY" --out "$REPO/docs/RESULT.md"
+  --clean-dir "$OUT/clean" --verify "$VERIFY" --out "$RESULT"
